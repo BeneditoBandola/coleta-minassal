@@ -105,8 +105,8 @@ def gerar_pdf_relatorio(promotor, loja, cidade, estado, df_preenchido):
 
 # --- ENVIO DE EMAIL ---
 def enviar_email_coleta(promotor, loja, cidade, estado, df_editado, feedback_promotor):
-    email_remetente = "SEU_EMAIL_AQUI@gmail.com" # ⚠️ Atualize aqui
-    senha_remetente = "SUA_SENHA_AQUI" # ⚠️ Atualize aqui
+    email_remetente = "beneditobandola@gmail.com" # ⚠️ Atualize aqui
+    senha_remetente = "kfih ccqx cskn oito" # ⚠️ Atualize aqui
     emails_destino = ["benedito.bandola@minassal.com.br"] 
 
     df_preenchido = df_editado[df_editado["PREÇO NA LOJA"].notna()]
