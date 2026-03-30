@@ -5,7 +5,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
-from datetime import datetime, timedelta # Importado o timedelta para o fuso
+from datetime import datetime, timedelta
 
 # --- BIBLIOTECAS PARA O PDF ---
 from reportlab.lib.pagesizes import A4
@@ -53,7 +53,6 @@ ROTAS_PROMOTORES = {
 
 # --- FUNÇÃO DE GERAÇÃO DE PDF COM HORÁRIO BRASIL ---
 def gerar_pdf_relatorio(promotor, loja, cidade, estado, df_preenchido):
-    # AJUSTE DE HORÁRIO PARA BRASÍLIA
     hora_brasil = datetime.now() - timedelta(hours=3)
     data_str = hora_brasil.strftime('%d/%m/%Y %H:%M')
     
@@ -80,9 +79,17 @@ def gerar_pdf_relatorio(promotor, loja, cidade, estado, df_preenchido):
         idx = i + 1
         nome = str(linha.PRODUTO).replace("⭐ ", "")[:40]
         cod = str(linha.CÓDIGO)
-        try: p_sug = float(str(linha.SUGERIDO).replace("R$ ", "").replace(",", "."))
+        
+        # Limpa o preço sugerido (remove R$ e trata decimal)
+        try: 
+            sug_limpo = str(linha.SUGERIDO).replace("R$ ", "").replace(".", "").replace(",", ".")
+            p_sug = float(sug_limpo)
         except: p_sug = 0.0
-        try: p_loja = float(getattr(linha, "_4"))
+        
+        # Limpa o preço da loja (trata a vírgula digitada)
+        try: 
+            loja_limpo = str(getattr(linha, "_4")).replace(",", ".")
+            p_loja = float(loja_limpo)
         except: p_loja = 0.0
 
         if p_loja <= 0:
@@ -103,10 +110,10 @@ def gerar_pdf_relatorio(promotor, loja, cidade, estado, df_preenchido):
     doc.build(elementos)
     return caminho_pdf
 
-# --- ENVIO DE EMAIL ---
+# --- ENVIO DE EMAIL CONFIGURADO ---
 def enviar_email_coleta(promotor, loja, cidade, estado, df_editado, feedback_promotor):
-    email_remetente = "beneditobandola@gmail.com" # ⚠️ Atualize aqui
-    senha_remetente = "kfih ccqx cskn oito" # ⚠️ Atualize aqui
+    email_remetente = "beneditobandola@gmail.com" 
+    senha_remetente = "kfih ccqx cskn oito" 
     emails_destino = ["benedito.bandola@minassal.com.br"] 
 
     df_preenchido = df_editado[df_editado["PREÇO NA LOJA"].notna()]
@@ -115,7 +122,7 @@ def enviar_email_coleta(promotor, loja, cidade, estado, df_editado, feedback_pro
     caminho_pdf = gerar_pdf_relatorio(promotor, loja, cidade, estado, df_preenchido)
     feedback_txt = f"\"{feedback_promotor}\"" if feedback_promotor.strip() != "" else "<i>Sem comentários.</i>"
 
-    corpo_email = f"<html><body><h2 style='color: #E2001A;'>Auditoria Recebida</h2><p><b>Loja:</b> {loja}</p><p><b>Promotor:</b> {promotor}</p><hr><h3>💬 Feedback:</h3><p>{feedback_txt}</p></body></html>"
+    corpo_email = f"<html><body><h2 style='color: #E2001A;'>Nova Auditoria Recebida</h2><p><b>Loja:</b> {loja}</p><p><b>Promotor:</b> {promotor}</p><hr><h3>💬 Inteligência de Campo:</h3><p>{feedback_txt}</p></body></html>"
 
     msg = MIMEMultipart()
     msg['From'], msg['To'], msg['Subject'] = email_remetente, ", ".join(emails_destino), f"✅ Auditoria PDV - {loja} ({promotor})"
@@ -133,7 +140,7 @@ def enviar_email_coleta(promotor, loja, cidade, estado, df_editado, feedback_pro
         server.quit()
         os.remove(caminho_pdf)
         return True, "Relatório enviado com sucesso!"
-    except Exception as e: return False, f"Erro: {e}"
+    except Exception as e: return False, f"Erro ao enviar: {e}"
 
 # --- CARREGAR DADOS ---
 @st.cache_data
@@ -161,11 +168,13 @@ if not df_vendas.empty:
     if st.session_state.promotor_logado is None:
         st.subheader("Selecione o seu Perfil")
         c1, c2 = st.columns(2)
-        if c1.button("👩‍💼 PAMELA"): st.session_state.promotor_logado = "Pamela"; st.rerun()
-        if c2.button("👩‍💼 FERNANDA"): st.session_state.promotor_logado = "Fernanda"; st.rerun()
+        if c1.button("👩‍💼 PAMELA", use_container_width=True): st.session_state.promotor_logado = "Pamela"; st.rerun()
+        if c2.button("👩‍💼 FERNANDA", use_container_width=True): st.session_state.promotor_logado = "Fernanda"; st.rerun()
     else:
         promotor = st.session_state.promotor_logado
-        if st.sidebar.button("Sair"): st.session_state.promotor_logado = None; st.rerun()
+        col_n, col_s = st.columns([4, 1])
+        col_n.info(f"👤 Logado como: **{promotor}**")
+        if col_s.button("Sair"): st.session_state.promotor_logado = None; st.rerun()
         
         cidades = ROTAS_PROMOTORES[promotor]
         df_vendas['CIDADE_BUSCA'] = df_vendas['CIDADE'].astype(str).str.upper().str.strip()
@@ -191,10 +200,11 @@ if not df_vendas.empty:
             if dados:
                 df_ed = st.data_editor(pd.DataFrame(dados), use_container_width=True, hide_index=True, disabled=["CÓDIGO", "PRODUTO", "SUGERIDO"])
                 st.markdown("### 💬 Inteligência de Campo")
-                feedback = st.text_area("O que poderíamos fazer para melhorar neste cliente?", height=100)
+                feedback = st.text_area("Na sua opinião, o que poderíamos fazer para melhorar nossa participação neste cliente?", height=100)
                 if st.button("🚀 ENVIAR AUDITORIA", type="primary", use_container_width=True):
                     cid_loja = df_f[df_f['CLIENTE NOME'] == loja]['CIDADE'].iloc[0]
                     ok, msg = enviar_email_coleta(promotor, loja, cid_loja, est, df_ed, feedback)
                     if ok: st.success(msg); st.balloons()
                     else: st.error(msg)
+            else: st.warning("Nenhum produto da tabela encontrado para este cliente.")
 else: st.error("Arquivo de Vendas não encontrado.")
