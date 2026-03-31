@@ -81,9 +81,16 @@ def gerar_pdf_relatorio(promotor, loja, cidade, estado, df_preenchido):
 
     def limpar_valor(v):
         if pd.isna(v) or v == "" or str(v).lower() == "none": return 0.0
-        # Remove R$, espaços e converte formato decimal
-        v_limpo = str(v).replace("R$", "").replace(" ", "").replace(".", "").replace(",", ".")
-        try: return float(v_limpo)
+        s = str(v).replace("R$", "").replace(" ", "").strip()
+        
+        # LÓGICA PARA MANTER PONTO OU VÍRGULA SEM MULTIPLICAR
+        if "," in s and "." in s: # Caso tenha os dois (ex: 1.250,50)
+            s = s.replace(".", "").replace(",", ".")
+        elif "," in s: # Caso tenha apenas vírgula (ex: 61,11)
+            s = s.replace(",", ".")
+        # Se tiver apenas ponto, o float(s) já resolve corretamente (ex: 61.11)
+        
+        try: return float(s)
         except: return 0.0
 
     for i, linha in enumerate(df_preenchido.itertuples()):
@@ -91,16 +98,13 @@ def gerar_pdf_relatorio(promotor, loja, cidade, estado, df_preenchido):
         nome = str(linha.PRODUTO).replace("⭐ ", "")[:35]
         cod = str(linha.CÓDIGO)
         
-        # Limpeza robusta para evitar erro de milhar
-        p_sug_str = str(linha.SUGERIDO).replace("R$", "").replace(" ", "").replace(",", ".")
-        try: p_sug = float(p_sug_str)
-        except: p_sug = 0.0
-
+        # Limpeza do sugerido
+        p_sug = limpar_valor(linha.SUGERIDO)
         p_loja = limpar_valor(getattr(linha, "_4"))
 
         if p_loja <= 0:
             sit, cor = "OPORTUNIDADE", colors.orange
-        elif p_loja <= (p_sug + 0.01):
+        elif p_loja <= (p_sug + 0.05):
             sit, cor = "CORRETO", colors.green
         else:
             diff = ((p_loja / p_sug) - 1) * 100
@@ -117,28 +121,17 @@ def gerar_pdf_relatorio(promotor, loja, cidade, estado, df_preenchido):
     doc.build(elementos)
     return caminho_pdf
 
-# --- FUNÇÃO DE ENVIO DE EMAIL ---
+# --- ENVIO DE EMAIL ---
 def enviar_email_coleta(promotor, loja, cidade, estado, df_editado, feedback):
     remetente = "beneditobandola@gmail.com"
     senha = "kfih ccqx cskn oito"
     destino = ["benedito.bandola@minassal.com.br"]
 
-    df_preenchido = df_editado.copy()
-    caminho_pdf = gerar_pdf_relatorio(promotor, loja, cidade, estado, df_preenchido)
+    caminho_pdf = gerar_pdf_relatorio(promotor, loja, cidade, estado, df_editado)
     
     msg = MIMEMultipart()
-    msg['From'] = remetente
-    msg['To'] = ", ".join(destino)
-    msg['Subject'] = f"✅ Auditoria PDV - {loja} ({promotor})"
-    
-    corpo = f"""
-    <html><body>
-    <h2 style='color: #E2001A;'>Auditoria Royal Canin Recebida</h2>
-    <p><b>Loja:</b> {loja}<br><b>Promotor:</b> {promotor}<br><b>Cidade:</b> {cidade}</p>
-    <hr>
-    <p><b>Observações:</b><br>{feedback if feedback.strip() else "Sem comentários."}</p>
-    </body></html>
-    """
+    msg['From'], msg['To'], msg['Subject'] = remetente, ", ".join(destino), f"✅ Auditoria PDV - {loja} ({promotor})"
+    corpo = f"<html><body><h2 style='color: #E2001A;'>Auditoria Royal Canin Recebida</h2><p><b>Loja:</b> {loja}<br><b>Promotor:</b> {promotor}<br><b>Cidade:</b> {cidade}</p><hr><p><b>Observações:</b><br>{feedback if feedback.strip() else 'Sem comentários.'}</p></body></html>"
     msg.attach(MIMEText(corpo, 'html'))
 
     try:
@@ -146,16 +139,11 @@ def enviar_email_coleta(promotor, loja, cidade, estado, df_editado, feedback):
             anexo = MIMEApplication(f.read(), _subtype="pdf")
             anexo.add_header('Content-Disposition', 'attachment', filename=os.path.basename(caminho_pdf))
             msg.attach(anexo)
-        
         s = smtplib.SMTP('smtp.gmail.com', 587)
-        s.starttls()
-        s.login(remetente, senha)
-        s.sendmail(remetente, destino, msg.as_string())
-        s.quit()
+        s.starttls(); s.login(remetente, senha); s.sendmail(remetente, destino, msg.as_string()); s.quit()
         os.remove(caminho_pdf)
         return True, "Relatório enviado com sucesso!"
-    except Exception as e:
-        return False, f"Erro: {e}"
+    except Exception as e: return False, f"Erro: {e}"
 
 # --- CARREGAR DADOS ---
 @st.cache_data
@@ -168,7 +156,7 @@ def carregar_dados(caminho):
         return df
     except: return pd.DataFrame()
 
-# --- INTERFACE PRINCIPAL ---
+# --- INTERFACE ---
 if 'promotor_logado' not in st.session_state: st.session_state.promotor_logado = None
 
 vendas = carregar_dados(ARQUIVO_VENDAS)
@@ -186,42 +174,35 @@ if not vendas.empty:
         st.sidebar.info(f"👤 {promotor}")
         if st.sidebar.button("Sair"): st.session_state.promotor_logado = None; st.rerun()
 
-        # Filtro de cidades conforme a promotora
         cidades_autorizadas = ROTAS_PROMOTORES[promotor]
         vendas['CIDADE_LIMPA'] = vendas['CIDADE'].astype(str).str.upper().str.strip()
         df_f = vendas[vendas['CIDADE_LIMPA'].isin(cidades_autorizadas)]
         
-        lojas = sorted(df_f['CLIENTE NOME'].unique())
-        
-        c1, c2 = st.columns([1, 2])
-        regiao = c1.radio("Região:", ["Minas Gerais (MG)", "São Paulo (SP)"])
-        loja_sel = c2.selectbox("🏪 Selecione a Loja:", ["-- Selecione --"] + lojas)
+        loja_sel = st.selectbox("🏪 Selecione a Loja:", ["-- Selecione --"] + sorted(df_f['CLIENTE NOME'].unique()))
+        regiao = st.radio("Região:", ["Minas Gerais (MG)", "São Paulo (SP)"], horizontal=True)
 
-        # Seleção da tabela de preços
         tab_ativa = tab_mg if "Minas" in regiao else tab_sp
+        mapa_precos = {}
         if not tab_ativa.empty:
             col_preco = next((c for c in tab_ativa.columns if "SUGEST" in c or "RECOMEN" in c), None)
             mapa_precos = pd.Series(tab_ativa[col_preco].values, index=tab_ativa['CODIGO'].astype(str).str.strip()).to_dict()
-        else: mapa_precos = {}
 
         if loja_sel != "-- Selecione --":
             df_loja = df_f[df_f['CLIENTE NOME'] == loja_sel].drop_duplicates(subset=['PRODUTO CODIGO'])
             dados_tabela = []
             for _, r in df_loja.iterrows():
                 cod = str(r['PRODUTO CODIGO']).strip()
-                nome = ("⭐ " if cod in CODIGOS_OURO else "") + str(r['PRODUTO NOME'])
                 p_sug = mapa_precos.get(cod, 0.0)
                 if p_sug > 0:
-                    dados_tabela.append({"CÓDIGO": cod, "PRODUTO": nome, "SUGERIDO": f"R$ {p_sug:.2f}", "PREÇO NA LOJA": 0.0})
+                    dados_tabela.append({"CÓDIGO": cod, "PRODUTO": ("⭐ " if cod in CODIGOS_OURO else "") + str(r['PRODUTO NOME']), "SUGERIDO": f"R$ {float(p_sug):.2f}", "PREÇO NA LOJA": 0.0})
 
             if dados_tabela:
                 df_editor = st.data_editor(pd.DataFrame(dados_tabela), use_container_width=True, hide_index=True, disabled=["CÓDIGO", "PRODUTO", "SUGERIDO"])
-                obs = st.text_area("Inteligência de Campo / Observações:")
+                obs = st.text_area("Inteligência de Campo:")
                 if st.button("🚀 ENVIAR AUDITORIA", use_container_width=True):
                     cid_final = df_f[df_f['CLIENTE NOME'] == loja_sel]['CIDADE'].iloc[0]
                     ok, res = enviar_email_coleta(promotor, loja_sel, cid_final, regiao, df_editor, obs)
                     if ok: st.success(res); st.balloons()
                     else: st.error(res)
-            else: st.warning("Nenhum produto encontrado na tabela de preços para este cliente.")
 else:
-    st.error("Arquivo 'Vendas' não encontrado. Certifique-se de que o CSV ou Excel está na mesma pasta.")
+    st.error("Arquivo 'Vendas' não encontrado.")
