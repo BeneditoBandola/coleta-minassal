@@ -62,15 +62,15 @@ def carregar_dados(caminho):
         if caminho.endswith('.csv'): 
             df = pd.read_csv(caminho, sep=None, engine='python', encoding='utf-8-sig')
         else: 
-            df = pd.read_excel(caminho, sheet_name="Book1")
-            # Remove a linha de "TOTAL GERAL" gerada pelo relatório novo se ela existir
+            df = pd.read_excel(caminho, sheet_name=0)
+            # Remove a linha de "TOTAL GERAL" se ela existir na primeira linha
             if len(df) > 0 and 'TOTAL GERAL' in str(df.iloc[0, 0]):
                 df = df.iloc[1:].reset_index(drop=True)
                 
         df.columns = [str(c).strip().upper() for c in df.columns]
         return df
     except Exception as e:
-        st.error(f"Erro ao ler o arquivo: {e}")
+        st.error(f"Erro ao ler o arquivo {caminho}: {e}")
         return pd.DataFrame()
 
 # --- FUNÇÃO DE GERAÇÃO DE PDF ---
@@ -188,7 +188,8 @@ if not vendas.empty:
         tab_ativa = tab_mg if "Minas" in regiao else tab_sp
         mapa_precos = {}
         if not tab_ativa.empty:
-            col_preco = next((c for c in tab_ativa.columns if "SUGEST" in c or "RECOMEN" in c), None)
+            # Procura pela coluna exata de sugestão ('SUGESTÃO CONSUMIDOR' ou similares)
+            col_preco = next((c for c in tab_ativa.columns if "SUGEST" in c or "RECOMEN" in c or "PRECO" in c), None)
             if col_preco:
                 mapa_precos = pd.Series(tab_ativa[col_preco].values, index=tab_ativa['CODIGO'].astype(str).str.strip()).to_dict()
 
