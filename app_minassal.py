@@ -107,14 +107,18 @@ def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido):
         nome = str(linha.PRODUTO).replace("⭐ ", "")[:35]
         cod = str(linha.CÓDIGO)
         
-        # A coluna NA_LOJA armazena True se marcou que NÃO tem o produto
+        p_sug = limpar_valor(linha.SUGERIDO)
+        
+        # Verifica se o produto foi marcado como ausente (NA_LOJA = True)
         nao_tem = getattr(linha, "NA_LOJA", False)
+        
         if nao_tem:
             sit, cor = "NÃO TEM NA LOJA", colors.gray
             p_loja_str = "AUSENTE"
+            p_sug_str = f"R$ {p_sug:.2f}"
         else:
-            p_sug = limpar_valor(linha.SUGERIDO)
             p_loja = limpar_valor(linha.PREÇO_NA_LOJA)
+            p_sug_str = f"R$ {p_sug:.2f}"
 
             if p_loja <= 0:
                 sit, cor = "OPORTUNIDADE", colors.orange
@@ -127,7 +131,7 @@ def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido):
                 sit, cor = (f"ACIMA {diff:.0f}%", colors.red) if diff >= 1 else ("CORRETO", colors.green)
                 p_loja_str = f"R$ {p_loja:.2f}"
                 
-        data.append([nome, cod, f"R$ {p_sug:.2f}", p_loja_str, sit])
+        data.append([nome, cod, p_sug_str, p_loja_str, sit])
         estilo_tabela.append(('TEXTCOLOR', (4, idx), (4, idx), cor))
         if cod in CODIGOS_OURO: 
             estilo_tabela.append(('BACKGROUND', (0, idx), (0, idx), colors.HexColor("#FEF3C7")))
@@ -212,7 +216,7 @@ if not vendas.empty:
                 p_sug = mapa_precos.get(cod, 0.0)
                 if p_sug > 0:
                     dados_tabela.append({
-                        "NA_LOJA": False,  # Checkbox começa desmarcado
+                        "NA_LOJA": False,  
                         "CÓDIGO": cod, 
                         "PRODUTO": ("⭐ " if cod in CODIGOS_OURO else "") + str(r['PRODUTO NOME']), 
                         "SUGERIDO": f"R$ {float(p_sug):.2f}", 
@@ -242,7 +246,7 @@ if not vendas.empty:
                         nao_tem = row_ed["NA_LOJA"]
                         p_loja = row_ed["PREÇO_NA_LOJA"]
                         
-                        # Se NÃO marcou que falta (ou seja, tem o produto), o preço não pode ser zero
+                        # Se não marcou que falta, o preço não pode ser zero
                         if not nao_tem:
                             try:
                                 if float(p_loja) <= 0.0:
