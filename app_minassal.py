@@ -46,7 +46,6 @@ def buscar_arquivo(nome_base):
 
 ARQUIVO_VENDAS = buscar_arquivo("Vendas")
 ARQUIVO_MG = buscar_arquivo("Tabela_MG")
-ARQUIVO_SP = buscar_arquivo("Tabela_SP")
 
 ROTAS_PROMOTORES = {
     "Pamela": ["POCOS DE CALDAS", "POÇOS DE CALDAS", "ANDRADAS", "VARGINHA", "TRES CORACOES", "TRÊS CORAÇÕES", "TRES PONTAS", "TRÊS PONTAS", "ITAJUBA", "ITAJUBÁ", "POUSO ALEGRE"],
@@ -63,7 +62,6 @@ def carregar_dados(caminho):
             df = pd.read_csv(caminho, sep=None, engine='python', encoding='utf-8-sig')
         else: 
             df = pd.read_excel(caminho, sheet_name=0)
-            # Remove a linha de "TOTAL GERAL" se ela existir na primeira linha
             if len(df) > 0 and 'TOTAL GERAL' in str(df.iloc[0, 0]):
                 df = df.iloc[1:].reset_index(drop=True)
                 
@@ -74,7 +72,7 @@ def carregar_dados(caminho):
         return pd.DataFrame()
 
 # --- FUNÇÃO DE GERAÇÃO DE PDF ---
-def gerar_pdf_relatorio(promotor, loja, cidade, estado, df_preenchido):
+def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido):
     hora_brasil = datetime.now() - timedelta(hours=3)
     data_str = hora_brasil.strftime('%d/%m/%Y %H:%M')
     
@@ -136,12 +134,12 @@ def gerar_pdf_relatorio(promotor, loja, cidade, estado, df_preenchido):
     return caminho_pdf
 
 # --- ENVIO DE EMAIL ---
-def enviar_email_coleta(promotor, loja, cidade, estado, df_editado, feedback):
+def enviar_email_coleta(promotor, loja, cidade, df_editado, feedback):
     remetente = "beneditobandola@gmail.com"
     senha = "kfih ccqx cskn oito"
     destino = ["benedito.bandola@minassal.com.br"]
 
-    caminho_pdf = gerar_pdf_relatorio(promotor, loja, cidade, estado, df_editado)
+    caminho_pdf = gerar_pdf_relatorio(promotor, loja, cidade, df_editado)
     
     msg = MIMEMultipart()
     msg['From'], msg['To'], msg['Subject'] = remetente, ", ".join(destino), f"✅ Auditoria PDV - {loja} ({promotor})"
@@ -164,7 +162,6 @@ if 'promotor_logado' not in st.session_state: st.session_state.promotor_logado =
 
 vendas = carregar_dados(ARQUIVO_VENDAS)
 tab_mg = carregar_dados(ARQUIVO_MG)
-tab_sp = carregar_dados(ARQUIVO_SP)
 
 if not vendas.empty:
     if st.session_state.promotor_logado is None:
@@ -183,15 +180,13 @@ if not vendas.empty:
         df_f = vendas[vendas['CIDADE_LIMPA'].isin(cidades_autorizadas)]
         
         loja_sel = st.selectbox("🏪 Selecione a Loja:", ["-- Selecione --"] + sorted(df_f['CLIENTE NOME'].dropna().unique()))
-        regiao = st.radio("Região:", ["Minas Gerais (MG)", "São Paulo (SP)"], horizontal=True)
 
-        tab_ativa = tab_mg if "Minas" in regiao else tab_sp
+        # Mapeamento fixo usando a Tabela_MG
         mapa_precos = {}
-        if not tab_ativa.empty:
-            # Procura pela coluna exata de sugestão ('SUGESTÃO CONSUMIDOR' ou similares)
-            col_preco = next((c for c in tab_ativa.columns if "SUGEST" in c or "RECOMEN" in c or "PRECO" in c), None)
+        if not tab_mg.empty:
+            col_preco = next((c for c in tab_mg.columns if "SUGEST" in c or "RECOMEN" in c or "PRECO" in c), None)
             if col_preco:
-                mapa_precos = pd.Series(tab_ativa[col_preco].values, index=tab_ativa['CODIGO'].astype(str).str.strip()).to_dict()
+                mapa_precos = pd.Series(tab_mg[col_preco].values, index=tab_mg['CODIGO'].astype(str).str.strip()).to_dict()
 
         if loja_sel != "-- Selecione --":
             df_loja = df_f[df_f['CLIENTE NOME'] == loja_sel].drop_duplicates(subset=['PRODUTO CODIGO'])
@@ -207,7 +202,7 @@ if not vendas.empty:
                 obs = st.text_area("Inteligência de Campo:")
                 if st.button("🚀 ENVIAR AUDITORIA", use_container_width=True):
                     cid_final = df_f[df_f['CLIENTE NOME'] == loja_sel]['CIDADE'].iloc[0]
-                    ok, res = enviar_email_coleta(promotor, loja_sel, cid_final, regiao, df_editor, obs)
+                    ok, res = enviar_email_coleta(promotor, loja_sel, cid_final, df_editor, obs)
                     if ok: st.success(res); st.balloons()
                     else: st.error(res)
             else:
