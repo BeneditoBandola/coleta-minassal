@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 # --- BIBLIOTECAS PARA O PDF ---
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
 # --- CONFIGURAÇÃO DA PÁGINA E DESIGN DARK ---
@@ -102,6 +102,8 @@ def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido, df_vendas_origina
         try: return float(s)
         except: return 0.0
 
+    produtos_ausentes_detalhes = []
+
     for i, linha in enumerate(df_preenchido.itertuples()):
         idx = i + 1
         nome = str(linha.PRODUTO).replace("⭐ ", "")[:35]
@@ -111,11 +113,19 @@ def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido, df_vendas_origina
         nao_tem = getattr(linha, "NA_LOJA", False)
         
         if nao_tem:
-            # Estudo histórico da última compra/movimentação para este produto nesta loja
+            sit, cor = "SEM PRODUTO", colors.gray
+            p_loja_str = "AUSENTE"
+            p_sug_str = f"R$ {p_sug:.2f}"
+            
+            # Buscar histórico detalhado para a seção inferior
             df_hist = df_vendas_original[
                 (df_vendas_original['CLIENTE NOME'] == loja) & 
                 (df_vendas_original['PRODUTO CODIGO'].astype(str).str.replace('.0', '', regex=False).str.strip() == cod)
             ]
+            
+            dt_fmt = "Desconhecida"
+            op_tipo = "VENDA"
+            rca_resp = "Não identificado"
             
             if not df_hist.empty:
                 df_hist['DATA_DT'] = pd.to_datetime(df_hist['DATA'], errors='coerce')
@@ -123,18 +133,18 @@ def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido, df_vendas_origina
                 ultima_linha = df_hist.iloc[0]
                 
                 dt_raw = ultima_linha['DATA_DT']
-                op_tipo = str(ultima_linha.get('OPERACAO', 'VENDA')).strip().upper()
-                
                 if pd.notna(dt_raw):
                     dt_fmt = dt_raw.strftime('%d/%m/%Y')
-                    sit, cor = f"AUSENTE (Últ. {op_tipo}: {dt_fmt})", colors.gray
-                else:
-                    sit, cor = "AUSENTE (Sem data reg.)", colors.gray
-            else:
-                sit, cor = "AUSENTE (Sem histórico)", colors.gray
+                op_tipo = str(ultima_linha.get('OPERACAO', 'VENDA')).strip().upper()
+                rca_resp = str(ultima_linha.get('RCA NOME', 'Não identificado')).strip().upper()
                 
-            p_loja_str = "AUSENTE"
-            p_sug_str = f"R$ {p_sug:.2f}"
+            produtos_ausentes_detalhes.append({
+                "produto": str(linha.PRODUTO).replace("⭐ ", ""),
+                "codigo": cod,
+                "data": dt_fmt,
+                "operacao": op_tipo,
+                "rca": rca_resp
+            })
         else:
             p_loja = limpar_valor(linha.PREÇO_NA_LOJA)
             p_sug_str = f"R$ {p_sug:.2f}"
@@ -158,6 +168,22 @@ def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido, df_vendas_origina
     t = Table(data, colWidths=[170, 50, 75, 75, 130])
     t.setStyle(TableStyle(estilo_tabela))
     elementos.append(t)
+    
+    # --- SEÇÃO INFERIOR PARA PRODUTOS AUSENTES ---
+    if produtos_ausentes_detalhes:
+        elementos.append(Spacer(1, 20))
+        elementos.append(Paragraph("<b>HISTÓRICO DE ITENS AUSENTES (ÚLTIMA COMPRA)</b>", estilos['Heading3']))
+        elementos.append(Spacer(1, 5))
+        
+        for item in produtos_ausentes_detalhes:
+            texto_detalhe = (
+                f"• <b>Produto:</b> {item['produto']} (Cód: {item['codigo']})<br/>"
+                f"&nbsp;&nbsp;&nbsp;&nbsp;<b>Última Compra:</b> {item['data']} | <b>Operação:</b> {item['operacao']}<br/>"
+                f"&nbsp;&nbsp;&nbsp;&nbsp;<b>Responsável pelas Vendas (RCA):</b> {item['rca']}"
+            )
+            elementos.append(Paragraph(texto_detalhe, estilos['Normal']))
+            elementos.append(Spacer(1, 4))
+
     doc.build(elementos)
     return caminho_pdf
 
