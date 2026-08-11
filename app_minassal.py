@@ -107,23 +107,32 @@ def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido):
         nome = str(linha.PRODUTO).replace("⭐ ", "")[:35]
         cod = str(linha.CÓDIGO)
         
-        p_sug = limpar_valor(linha.SUGERIDO)
-        p_loja = limpar_valor(getattr(linha, "_4"))
-
-        if p_loja <= 0:
-            sit, cor = "OPORTUNIDADE", colors.orange
-        elif p_loja <= (p_sug + 0.05):
-            sit, cor = "CORRETO", colors.green
+        # A coluna NA_LOJA armazena True se marcou que NÃO tem o produto
+        nao_tem = getattr(linha, "NA_LOJA", False)
+        if nao_tem:
+            sit, cor = "NÃO TEM NA LOJA", colors.gray
+            p_loja_str = "AUSENTE"
         else:
-            diff = ((p_loja / p_sug) - 1) * 100
-            sit, cor = (f"ACIMA {diff:.0f}%", colors.red) if diff >= 1 else ("CORRETO", colors.green)
+            p_sug = limpar_valor(linha.SUGERIDO)
+            p_loja = limpar_valor(linha.PREÇO_NA_LOJA)
+
+            if p_loja <= 0:
+                sit, cor = "OPORTUNIDADE", colors.orange
+                p_loja_str = "--"
+            elif p_loja <= (p_sug + 0.05):
+                sit, cor = "CORRETO", colors.green
+                p_loja_str = f"R$ {p_loja:.2f}"
+            else:
+                diff = ((p_loja / p_sug) - 1) * 100
+                sit, cor = (f"ACIMA {diff:.0f}%", colors.red) if diff >= 1 else ("CORRETO", colors.green)
+                p_loja_str = f"R$ {p_loja:.2f}"
                 
-        data.append([nome, cod, f"R$ {p_sug:.2f}", f"R$ {p_loja:.2f}" if p_loja > 0 else "--", sit])
+        data.append([nome, cod, f"R$ {p_sug:.2f}", p_loja_str, sit])
         estilo_tabela.append(('TEXTCOLOR', (4, idx), (4, idx), cor))
         if cod in CODIGOS_OURO: 
             estilo_tabela.append(('BACKGROUND', (0, idx), (0, idx), colors.HexColor("#FEF3C7")))
 
-    t = Table(data, colWidths=[200, 60, 80, 80, 100])
+    t = Table(data, colWidths=[180, 60, 80, 80, 100])
     t.setStyle(TableStyle(estilo_tabela))
     elementos.append(t)
     doc.build(elementos)
@@ -196,35 +205,55 @@ if not vendas.empty:
             df_loja = df_f[df_f['CLIENTE NOME'] == loja_sel].drop_duplicates(subset=['PRODUTO CODIGO'])
             dados_tabela = []
             for _, r in df_loja.iterrows():
-                c_prod = str(r['PRODUTO CODIGO'])
-                if c_prod.endswith('.0'): c_prod = c_prod[:-2]
-                cod = c_prod.strip()
+                cod = str(r['PRODUTO CODIGO'])
+                if cod.endswith('.0'): cod = cod[:-2]
+                cod = cod.strip()
                 
                 p_sug = mapa_precos.get(cod, 0.0)
                 if p_sug > 0:
-                    dados_tabela.append({"CÓDIGO": cod, "PRODUTO": ("⭐ " if cod in CODIGOS_OURO else "") + str(r['PRODUTO NOME']), "SUGERIDO": f"R$ {float(p_sug):.2f}", "PREÇO NA LOJA": 0.0})
+                    dados_tabela.append({
+                        "NA_LOJA": False,  # Checkbox começa desmarcado
+                        "CÓDIGO": cod, 
+                        "PRODUTO": ("⭐ " if cod in CODIGOS_OURO else "") + str(r['PRODUTO NOME']), 
+                        "SUGERIDO": f"R$ {float(p_sug):.2f}", 
+                        "PREÇO_NA_LOJA": 0.0
+                    })
 
             if dados_tabela:
-                df_editor = st.data_editor(pd.DataFrame(dados_tabela), use_container_width=True, hide_index=True, disabled=["CÓDIGO", "PRODUTO", "SUGERIDO"])
+                df_editor = st.data_editor(
+                    pd.DataFrame(dados_tabela), 
+                    use_container_width=True, 
+                    hide_index=True, 
+                    disabled=["CÓDIGO", "PRODUTO", "SUGERIDO"],
+                    column_config={
+                        "NA_LOJA": st.column_config.CheckboxColumn(
+                            "MARQUE SE NÃO TIVER O PRODUTO",
+                            help="Marque esta caixinha caso o produto esteja ausente na loja.",
+                            default=False,
+                        )
+                    }
+                )
+                
                 obs = st.text_area("Inteligência de Campo:")
                 
                 if st.button("🚀 ENVIAR AUDITORIA", use_container_width=True):
-                    # --- VALIDAÇÃO DE SEGURANÇA: PREÇOS ZERADOS ---
-                    precos_loja = df_editor.iloc[:, 3].tolist() # Pega a coluna "PREÇO NA LOJA"
-                    tem_zerado = False
-                    for val in precos_loja:
-                        # Converte e valida se é zero ou vazio
-                        s_val = str(val).replace("R$", "").replace(",", ".").strip()
-                        try:
-                            if float(s_val) <= 0.0:
-                                tem_zerado = True
+                    tem_erro = False
+                    for _, row_ed in df_editor.iterrows():
+                        nao_tem = row_ed["NA_LOJA"]
+                        p_loja = row_ed["PREÇO_NA_LOJA"]
+                        
+                        # Se NÃO marcou que falta (ou seja, tem o produto), o preço não pode ser zero
+                        if not nao_tem:
+                            try:
+                                if float(p_loja) <= 0.0:
+                                    tem_erro = True
+                                    break
+                            except:
+                                tem_erro = True
                                 break
-                        except:
-                            tem_zerado = True
-                            break
 
-                    if tem_zerado:
-                        st.error("⚠️ Atenção: Há produtos com o preço na loja igual a zero (0.0). Preencha o preço de todos os itens antes de enviar o relatório!")
+                    if tem_erro:
+                        st.error("⚠️ Atenção: Há produtos sem o preço preenchido na loja! Se o produto estiver ausente, marque a caixinha 'MARQUE SE NÃO TIVER O PRODUTO'.")
                     else:
                         cid_final = df_f[df_f['CLIENTE NOME'] == loja_sel]['CIDADE'].iloc[0]
                         ok, res = enviar_email_coleta(promotor, loja_sel, cid_final, df_editor, obs)
