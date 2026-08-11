@@ -177,7 +177,6 @@ if not vendas.empty:
         
         loja_sel = st.selectbox("🏪 Selecione a Loja:", ["-- Selecione --"] + sorted(df_f['CLIENTE NOME'].dropna().unique()))
 
-        # --- MAPA DE PREÇOS RIGOROSO (Tratando códigos e ponto decimal) ---
         mapa_precos = {}
         if not tab_mg.empty:
             col_cod_tab = next((c for c in tab_mg.columns if "COD" in c), None)
@@ -186,7 +185,6 @@ if not vendas.empty:
             if col_cod_tab and col_preco:
                 for _, row in tab_mg.iterrows():
                     c_val = str(row[col_cod_tab])
-                    # Limpa o .0 se houver
                     if c_val.endswith('.0'): c_val = c_val[:-2]
                     c_val = c_val.strip()
                     try:
@@ -209,11 +207,29 @@ if not vendas.empty:
             if dados_tabela:
                 df_editor = st.data_editor(pd.DataFrame(dados_tabela), use_container_width=True, hide_index=True, disabled=["CÓDIGO", "PRODUTO", "SUGERIDO"])
                 obs = st.text_area("Inteligência de Campo:")
+                
                 if st.button("🚀 ENVIAR AUDITORIA", use_container_width=True):
-                    cid_final = df_f[df_f['CLIENTE NOME'] == loja_sel]['CIDADE'].iloc[0]
-                    ok, res = enviar_email_coleta(promotor, loja_sel, cid_final, df_editor, obs)
-                    if ok: st.success(res); st.balloons()
-                    else: st.error(res)
+                    # --- VALIDAÇÃO DE SEGURANÇA: PREÇOS ZERADOS ---
+                    precos_loja = df_editor.iloc[:, 3].tolist() # Pega a coluna "PREÇO NA LOJA"
+                    tem_zerado = False
+                    for val in precos_loja:
+                        # Converte e valida se é zero ou vazio
+                        s_val = str(val).replace("R$", "").replace(",", ".").strip()
+                        try:
+                            if float(s_val) <= 0.0:
+                                tem_zerado = True
+                                break
+                        except:
+                            tem_zerado = True
+                            break
+
+                    if tem_zerado:
+                        st.error("⚠️ Atenção: Há produtos com o preço na loja igual a zero (0.0). Preencha o preço de todos os itens antes de enviar o relatório!")
+                    else:
+                        cid_final = df_f[df_f['CLIENTE NOME'] == loja_sel]['CIDADE'].iloc[0]
+                        ok, res = enviar_email_coleta(promotor, loja_sel, cid_final, df_editor, obs)
+                        if ok: st.success(res); st.balloons()
+                        else: st.error(res)
             else:
                 st.warning("Nenhum produto com preço sugerido mapeado foi encontrado para esta loja.")
 else:
