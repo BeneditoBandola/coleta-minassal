@@ -53,22 +53,18 @@ ROTAS_PROMOTORES = {
     "Madalla": ["CONSELHEIRO LAFAIETE", "GUARANI", "GUIDOVAL", "MURIAE", "MURIAÉ", "PIRAUBA", "PIRAÚBA", "RIO POMBA", "TOCANTINS", "UBA", "UBÁ", "VICOSA", "VIÇOSA", "VISCONDE DO RIO BRANCO"]
 }
 
-# --- CARREGAR DADOS COM SUPORTE À NOVA ESTRUTURA ---
+# --- CARREGAR DADOS COM PADRONIZAÇÃO DE CÓDIGOS ---
 @st.cache_data
 def carregar_dados(caminho):
     if not caminho: return pd.DataFrame()
     try:
-        if caminho.endswith('.csv'): 
-            df = pd.read_csv(caminho, sep=None, engine='python', encoding='utf-8-sig')
-        else: 
-            df = pd.read_excel(caminho, sheet_name=0)
-            if len(df) > 0 and 'TOTAL GERAL' in str(df.iloc[0, 0]):
-                df = df.iloc[1:].reset_index(drop=True)
-                
+        df = pd.read_excel(caminho, sheet_name=0)
+        if len(df) > 0 and 'TOTAL GERAL' in str(df.iloc[0, 0]):
+            df = df.iloc[1:].reset_index(drop=True)
         df.columns = [str(c).strip().upper() for c in df.columns]
         return df
     except Exception as e:
-        st.error(f"Erro ao ler o arquivo {caminho}: {e}")
+        st.error(f"Erro ao ler {caminho}: {e}")
         return pd.DataFrame()
 
 # --- FUNÇÃO DE GERAÇÃO DE PDF ---
@@ -181,18 +177,31 @@ if not vendas.empty:
         
         loja_sel = st.selectbox("🏪 Selecione a Loja:", ["-- Selecione --"] + sorted(df_f['CLIENTE NOME'].dropna().unique()))
 
-        # Mapeamento fixo usando a Tabela_MG
+        # --- MAPA DE PREÇOS RIGOROSO (Tratando códigos e ponto decimal) ---
         mapa_precos = {}
         if not tab_mg.empty:
+            col_cod_tab = next((c for c in tab_mg.columns if "COD" in c), None)
             col_preco = next((c for c in tab_mg.columns if "SUGEST" in c or "RECOMEN" in c or "PRECO" in c), None)
-            if col_preco:
-                mapa_precos = pd.Series(tab_mg[col_preco].values, index=tab_mg['CODIGO'].astype(str).str.strip()).to_dict()
+            
+            if col_cod_tab and col_preco:
+                for _, row in tab_mg.iterrows():
+                    c_val = str(row[col_cod_tab])
+                    # Limpa o .0 se houver
+                    if c_val.endswith('.0'): c_val = c_val[:-2]
+                    c_val = c_val.strip()
+                    try:
+                        mapa_precos[c_val] = float(row[col_preco])
+                    except:
+                        pass
 
         if loja_sel != "-- Selecione --":
             df_loja = df_f[df_f['CLIENTE NOME'] == loja_sel].drop_duplicates(subset=['PRODUTO CODIGO'])
             dados_tabela = []
             for _, r in df_loja.iterrows():
-                cod = str(r['PRODUTO CODIGO']).strip()
+                c_prod = str(r['PRODUTO CODIGO'])
+                if c_prod.endswith('.0'): c_prod = c_prod[:-2]
+                cod = c_prod.strip()
+                
                 p_sug = mapa_precos.get(cod, 0.0)
                 if p_sug > 0:
                     dados_tabela.append({"CÓDIGO": cod, "PRODUTO": ("⭐ " if cod in CODIGOS_OURO else "") + str(r['PRODUTO NOME']), "SUGERIDO": f"R$ {float(p_sug):.2f}", "PREÇO NA LOJA": 0.0})
