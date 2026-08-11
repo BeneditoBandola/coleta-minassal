@@ -68,7 +68,7 @@ def carregar_dados(caminho):
         return pd.DataFrame()
 
 # --- FUNÇÃO DE GERAÇÃO DE PDF ---
-def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido):
+def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido, df_vendas_original):
     hora_brasil = datetime.now() - timedelta(hours=3)
     data_str = hora_brasil.strftime('%d/%m/%Y %H:%M')
     
@@ -108,12 +108,31 @@ def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido):
         cod = str(linha.CÓDIGO)
         
         p_sug = limpar_valor(linha.SUGERIDO)
-        
-        # Verifica se o produto foi marcado como ausente (NA_LOJA = True)
         nao_tem = getattr(linha, "NA_LOJA", False)
         
         if nao_tem:
-            sit, cor = "NÃO TEM NA LOJA", colors.gray
+            # Estudo histórico da última compra/movimentação para este produto nesta loja
+            df_hist = df_vendas_original[
+                (df_vendas_original['CLIENTE NOME'] == loja) & 
+                (df_vendas_original['PRODUTO CODIGO'].astype(str).str.replace('.0', '', regex=False).str.strip() == cod)
+            ]
+            
+            if not df_hist.empty:
+                df_hist['DATA_DT'] = pd.to_datetime(df_hist['DATA'], errors='coerce')
+                df_hist = df_hist.sort_values(by='DATA_DT', ascending=False)
+                ultima_linha = df_hist.iloc[0]
+                
+                dt_raw = ultima_linha['DATA_DT']
+                op_tipo = str(ultima_linha.get('OPERACAO', 'VENDA')).strip().upper()
+                
+                if pd.notna(dt_raw):
+                    dt_fmt = dt_raw.strftime('%d/%m/%Y')
+                    sit, cor = f"AUSENTE (Últ. {op_tipo}: {dt_fmt})", colors.gray
+                else:
+                    sit, cor = "AUSENTE (Sem data reg.)", colors.gray
+            else:
+                sit, cor = "AUSENTE (Sem histórico)", colors.gray
+                
             p_loja_str = "AUSENTE"
             p_sug_str = f"R$ {p_sug:.2f}"
         else:
@@ -136,19 +155,19 @@ def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido):
         if cod in CODIGOS_OURO: 
             estilo_tabela.append(('BACKGROUND', (0, idx), (0, idx), colors.HexColor("#FEF3C7")))
 
-    t = Table(data, colWidths=[180, 60, 80, 80, 100])
+    t = Table(data, colWidths=[170, 50, 75, 75, 130])
     t.setStyle(TableStyle(estilo_tabela))
     elementos.append(t)
     doc.build(elementos)
     return caminho_pdf
 
 # --- ENVIO DE EMAIL ---
-def enviar_email_coleta(promotor, loja, cidade, df_editado, feedback):
+def enviar_email_coleta(promotor, loja, cidade, df_editado, feedback, df_vendas_original):
     remetente = "beneditobandola@gmail.com"
     senha = "kfih ccqx cskn oito"
     destino = ["benedito.bandola@minassal.com.br"]
 
-    caminho_pdf = gerar_pdf_relatorio(promotor, loja, cidade, df_editado)
+    caminho_pdf = gerar_pdf_relatorio(promotor, loja, cidade, df_editado, df_vendas_original)
     
     msg = MIMEMultipart()
     msg['From'], msg['To'], msg['Subject'] = remetente, ", ".join(destino), f"✅ Auditoria PDV - {loja} ({promotor})"
@@ -246,7 +265,6 @@ if not vendas.empty:
                         nao_tem = row_ed["NA_LOJA"]
                         p_loja = row_ed["PREÇO_NA_LOJA"]
                         
-                        # Se não marcou que falta, o preço não pode ser zero
                         if not nao_tem:
                             try:
                                 if float(p_loja) <= 0.0:
@@ -260,7 +278,7 @@ if not vendas.empty:
                         st.error("⚠️ Atenção: Há produtos sem o preço preenchido na loja! Se o produto estiver ausente, marque a caixinha 'MARQUE SE NÃO TIVER O PRODUTO'.")
                     else:
                         cid_final = df_f[df_f['CLIENTE NOME'] == loja_sel]['CIDADE'].iloc[0]
-                        ok, res = enviar_email_coleta(promotor, loja_sel, cid_final, df_editor, obs)
+                        ok, res = enviar_email_coleta(promotor, loja_sel, cid_final, df_editor, obs, vendas)
                         if ok: st.success(res); st.balloons()
                         else: st.error(res)
             else:
