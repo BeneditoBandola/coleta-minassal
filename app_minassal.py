@@ -77,12 +77,12 @@ def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido, df_vendas_origina
     estilos = getSampleStyleSheet()
     elementos = []
     
-    elementos.append(Paragraph(f"<b>RELATÓRIO DE AUDITORIA - ROYAL CANIN</b>", estilos['Title']))
+    elementos.append(Paragraph(f"<b>RELATÓRIO DE AUDITORIA & PRECIFICAÇÃO - ROYAL CANIN</b>", estilos['Title']))
     elementos.append(Paragraph(f"<b>LOJA:</b> {loja}", estilos['Heading2']))
     elementos.append(Paragraph(f"<b>PROMOTOR(A):</b> {promotor} | <b>CIDADE:</b> {cidade} | <b>DATA:</b> {data_str}", estilos['Normal']))
     elementos.append(Spacer(1, 15))
     
-    data = [["PRODUTO", "CÓDIGO", "PREÇO SUG.", "PREÇO LOJA", "SITUAÇÃO"]]
+    data = [["PRODUTO", "CÓDIGO", "PREÇO SUG. (RECOMENDADO)", "PREÇO LOJA", "SITUAÇÃO / MARKUP"]]
     estilo_tabela = [
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#E2001A")),
         ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
@@ -106,7 +106,7 @@ def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido, df_vendas_origina
 
     for i, linha in enumerate(df_preenchido.itertuples()):
         idx = i + 1
-        nome = str(linha.PRODUTO).replace("⭐ ", "")[:35]
+        nome = str(linha.PRODUTO).replace("⭐ ", "")[:32]
         cod = str(linha.CÓDIGO)
         
         p_sug = limpar_valor(linha.SUGERIDO)
@@ -117,7 +117,6 @@ def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido, df_vendas_origina
             p_loja_str = "AUSENTE"
             p_sug_str = f"R$ {p_sug:.2f}"
             
-            # Buscar histórico detalhado para a seção inferior
             df_hist = df_vendas_original[
                 (df_vendas_original['CLIENTE NOME'] == loja) & 
                 (df_vendas_original['PRODUTO CODIGO'].astype(str).str.replace('.0', '', regex=False).str.strip() == cod)
@@ -153,11 +152,14 @@ def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido, df_vendas_origina
                 sit, cor = "OPORTUNIDADE", colors.orange
                 p_loja_str = "--"
             elif p_loja <= (p_sug + 0.05):
-                sit, cor = "CORRETO", colors.green
+                sit, cor = "CORRETO (Abaixo/Igual)", colors.green
                 p_loja_str = f"R$ {p_loja:.2f}"
             else:
                 diff = ((p_loja / p_sug) - 1) * 100
-                sit, cor = (f"ACIMA {diff:.0f}%", colors.red) if diff >= 1 else ("CORRETO", colors.green)
+                if diff >= 1:
+                    sit, cor = f"ACIMA +{diff:.1f}%", colors.red
+                else:
+                    sit, cor = "CORRETO (Abaixo/Igual)", colors.green
                 p_loja_str = f"R$ {p_loja:.2f}"
                 
         data.append([nome, cod, p_sug_str, p_loja_str, sit])
@@ -165,15 +167,15 @@ def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido, df_vendas_origina
         if cod in CODIGOS_OURO: 
             estilo_tabela.append(('BACKGROUND', (0, idx), (0, idx), colors.HexColor("#FEF3C7")))
 
-    t = Table(data, colWidths=[170, 50, 75, 75, 130])
+    t = Table(data, colWidths=[150, 45, 95, 75, 110])
     t.setStyle(TableStyle(estilo_tabela))
     elementos.append(t)
     
     # --- SEÇÃO INFERIOR PARA PRODUTOS AUSENTES ---
     if produtos_ausentes_detalhes:
-        elementos.append(Spacer(1, 20))
+        elementos.append(Spacer(1, 15))
         elementos.append(Paragraph("<b>HISTÓRICO DE ITENS AUSENTES (ÚLTIMA COMPRA)</b>", estilos['Heading3']))
-        elementos.append(Spacer(1, 5))
+        elementos.append(Spacer(1, 4))
         
         for item in produtos_ausentes_detalhes:
             texto_detalhe = (
@@ -182,7 +184,7 @@ def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido, df_vendas_origina
                 f"&nbsp;&nbsp;&nbsp;&nbsp;<b>Responsável pelas Vendas (RCA):</b> {item['rca']}"
             )
             elementos.append(Paragraph(texto_detalhe, estilos['Normal']))
-            elementos.append(Spacer(1, 4))
+            elementos.append(Spacer(1, 3))
 
     doc.build(elementos)
     return caminho_pdf
@@ -264,21 +266,28 @@ if not vendas.empty:
                         "NA_LOJA": False,  
                         "CÓDIGO": cod, 
                         "PRODUTO": ("⭐ " if cod in CODIGOS_OURO else "") + str(r['PRODUTO NOME']), 
-                        "SUGERIDO": f"R$ {float(p_sug):.2f}", 
+                        "SUGERIDO (RECOMENDADO)": f"R$ {float(p_sug):.2f}", 
                         "PREÇO_NA_LOJA": 0.0
                     })
 
             if dados_tabela:
+                st.info("💡 **Legenda de Auditoria:** Preencha o preço praticado na loja. O sistema sinaliza em **Verde** se estiver igual/abaixo do recomendado (ideal para giro) e em **Vermelho** se estiver acima do recomendado com o percentual de desvio.")
+                
                 df_editor = st.data_editor(
                     pd.DataFrame(dados_tabela), 
                     use_container_width=True, 
                     hide_index=True, 
-                    disabled=["CÓDIGO", "PRODUTO", "SUGERIDO"],
+                    disabled=["CÓDIGO", "PRODUTO", "SUGERIDO (RECOMENDADO)"],
                     column_config={
                         "NA_LOJA": st.column_config.CheckboxColumn(
-                            "MARQUE SE NÃO TIVER O PRODUTO",
+                            "NÃO TEM NA LOJA?",
                             help="Marque esta caixinha caso o produto esteja ausente na loja.",
                             default=False,
+                        ),
+                        "PREÇO_NA_LOJA": st.column_config.NumberColumn(
+                            "PREÇO PRATICADO NA LOJA (R$)",
+                            min_value=0.0,
+                            format="R$ %.2f"
                         )
                     }
                 )
@@ -301,7 +310,7 @@ if not vendas.empty:
                                 break
 
                     if tem_erro:
-                        st.error("⚠️ Atenção: Há produtos sem o preço preenchido na loja! Se o produto estiver ausente, marque a caixinha 'MARQUE SE NÃO TIVER O PRODUTO'.")
+                        st.error("⚠️ Atenção: Há produtos sem o preço preenchido na loja! Se o produto estiver ausente, marque a caixinha 'NÃO TEM NA LOJA?'.")
                     else:
                         cid_final = df_f[df_f['CLIENTE NOME'] == loja_sel]['CIDADE'].iloc[0]
                         ok, res = enviar_email_coleta(promotor, loja_sel, cid_final, df_editor, obs, vendas)
