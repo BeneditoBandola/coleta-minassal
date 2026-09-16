@@ -7,8 +7,8 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from datetime import datetime, timedelta
 
-# --- BIBLIOTECAS PARA O PDF ---
-from reportlab.lib.pagesizes import A4
+# --- BIBLIOTECAS PARA O PDF (MODO PAISAGEM) ---
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
@@ -67,22 +67,23 @@ def carregar_dados(caminho):
         st.error(f"Erro ao ler {caminho}: {e}")
         return pd.DataFrame()
 
-# --- FUNÇÃO DE GERAÇÃO DE PDF ---
+# --- FUNÇÃO DE GERAÇÃO DE PDF (MODO PAISAGEM) ---
 def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido, df_vendas_original):
     hora_brasil = datetime.now() - timedelta(hours=3)
     data_str = hora_brasil.strftime('%d/%m/%Y %H:%M')
     
     caminho_pdf = f"Auditoria_{loja[:10].replace(' ', '_')}.pdf"
-    doc = SimpleDocTemplate(caminho_pdf, pagesize=A4)
+    # Configuração em Modo Paisagem (A4 Landscape)
+    doc = SimpleDocTemplate(caminho_pdf, pagesize=landscape(A4), leftMargin=20, rightMargin=20, topMargin=20, bottomMargin=20)
     estilos = getSampleStyleSheet()
     elementos = []
     
     elementos.append(Paragraph(f"<b>RELATÓRIO DE AUDITORIA & PRECIFICAÇÃO - ROYAL CANIN</b>", estilos['Title']))
     elementos.append(Paragraph(f"<b>LOJA:</b> {loja}", estilos['Heading2']))
     elementos.append(Paragraph(f"<b>PROMOTOR(A):</b> {promotor} | <b>CIDADE:</b> {cidade} | <b>DATA:</b> {data_str}", estilos['Normal']))
-    elementos.append(Spacer(1, 15))
+    elementos.append(Spacer(1, 10))
     
-    data = [["PRODUTO", "CÓDIGO", "PREÇO SUG. (RECOMENDADO)", "PREÇO LOJA", "SITUAÇÃO / MARKUP"]]
+    data = [["PRODUTO", "CÓDIGO", "PR. SUGERIDO", "M. RECOMENDADO", "PR. LOJA", "M. PRATICADO", "SITUAÇÃO / DESVIO"]]
     estilo_tabela = [
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#E2001A")),
         ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
@@ -106,16 +107,19 @@ def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido, df_vendas_origina
 
     for i, linha in enumerate(df_preenchido.itertuples()):
         idx = i + 1
-        nome = str(linha.PRODUTO).replace("⭐ ", "")[:32]
+        nome = str(linha.PRODUTO).replace("⭐ ", "")[:40]
         cod = str(linha.CÓDIGO)
         
         p_sug = limpar_valor(linha.SUGERIDO)
+        markup_rec = getattr(linha, 'MARKUP_REC_VAL', 35.0) # Estimativa base de markup recomendado ou extraído
         nao_tem = getattr(linha, "NA_LOJA", False)
         
         if nao_tem:
             sit, cor = "SEM PRODUTO", colors.gray
             p_loja_str = "AUSENTE"
             p_sug_str = f"R$ {p_sug:.2f}"
+            m_rec_str = f"{markup_rec:.1f}%"
+            m_prat_str = "--"
             
             df_hist = df_vendas_original[
                 (df_vendas_original['CLIENTE NOME'] == loja) & 
@@ -147,44 +151,59 @@ def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido, df_vendas_origina
         else:
             p_loja = limpar_valor(linha.PREÇO_NA_LOJA)
             p_sug_str = f"R$ {p_sug:.2f}"
+            m_rec_str = f"{markup_rec:.1f}%"
 
             if p_loja <= 0:
                 sit, cor = "OPORTUNIDADE", colors.orange
                 p_loja_str = "--"
-            elif p_loja <= (p_sug + 0.05):
-                sit, cor = "CORRETO (Abaixo/Igual)", colors.green
-                p_loja_str = f"R$ {p_loja:.2f}"
+                m_prat_str = "--"
             else:
+                # Estimativa de markup praticado em cima do custo base implícito ou variação proporcional
                 diff = ((p_loja / p_sug) - 1) * 100
-                if diff >= 1:
-                    sit, cor = f"ACIMA +{diff:.1f}%", colors.red
-                else:
-                    sit, cor = "CORRETO (Abaixo/Igual)", colors.green
+                markup_prat = markup_rec + diff
+                m_prat_str = f"{markup_prat:.1f}%"
                 p_loja_str = f"R$ {p_loja:.2f}"
+
+                if p_loja <= (p_sug + 0.05):
+                    sit, cor = "CORRETO (Abaixo/Igual)", colors.green
+                else:
+                    if diff >= 1:
+                        sit, cor = f"ACIMA +{diff:.1f}%", colors.red
+                    else:
+                        sit, cor = "CORRETO (Abaixo/Igual)", colors.green
                 
-        data.append([nome, cod, p_sug_str, p_loja_str, sit])
-        estilo_tabela.append(('TEXTCOLOR', (4, idx), (4, idx), cor))
+        data.append([nome, cod, p_sug_str, m_rec_str, p_loja_str, m_prat_str, sit])
+        # Colorir colunas de Markup e Situação conforme regras
+        estilo_tabela.append(('TEXTCOLOR', (3, idx), (3, idx), colors.HexColor("#166534"))) # Recomendado em Verde
+        if not nao_tem and p_loja > 0:
+            if p_loja <= (p_sug + 0.05):
+                estilo_tabela.append(('TEXTCOLOR', (5, idx), (5, idx), colors.HexColor("#166534"))) # Praticado Verde se <=
+            else:
+                estilo_tabela.append(('TEXTCOLOR', (5, idx), (5, idx), colors.HexColor("#991b1b"))) # Praticado Vermelho se >
+        estilo_tabela.append(('TEXTCOLOR', (6, idx), (6, idx), cor))
+        
         if cod in CODIGOS_OURO: 
             estilo_tabela.append(('BACKGROUND', (0, idx), (0, idx), colors.HexColor("#FEF3C7")))
 
-    t = Table(data, colWidths=[150, 45, 95, 75, 110])
+    # Largura total para landscape A4 (~760pt úteis)
+    t = Table(data, colWidths=[200, 55, 90, 95, 90, 95, 135])
     t.setStyle(TableStyle(estilo_tabela))
     elementos.append(t)
     
     # --- SEÇÃO INFERIOR PARA PRODUTOS AUSENTES ---
     if produtos_ausentes_detalhes:
-        elementos.append(Spacer(1, 15))
+        elementos.append(Spacer(1, 12))
         elementos.append(Paragraph("<b>HISTÓRICO DE ITENS AUSENTES (ÚLTIMA COMPRA)</b>", estilos['Heading3']))
-        elementos.append(Spacer(1, 4))
+        elementos.append(Spacer(1, 3))
         
         for item in produtos_ausentes_detalhes:
             texto_detalhe = (
-                f"• <b>Produto:</b> {item['produto']} (Cód: {item['codigo']})<br/>"
-                f"&nbsp;&nbsp;&nbsp;&nbsp;<b>Última Compra:</b> {item['data']} | <b>Operação:</b> {item['operacao']}<br/>"
-                f"&nbsp;&nbsp;&nbsp;&nbsp;<b>Responsável pelas Vendas (RCA):</b> {item['rca']}"
+                f"• <b>Produto:</b> {item['produto']} (Cód: {item['codigo']}) | "
+                f"<b>Última Compra:</b> {item['data']} | <b>Operação:</b> {item['operacao']} | "
+                f"<b>RCA:</b> {item['rca']}"
             )
             elementos.append(Paragraph(texto_detalhe, estilos['Normal']))
-            elementos.append(Spacer(1, 3))
+            elementos.append(Spacer(1, 2))
 
     doc.build(elementos)
     return caminho_pdf
@@ -267,21 +286,22 @@ if not vendas.empty:
                         "CÓDIGO": cod, 
                         "PRODUTO": ("⭐ " if cod in CODIGOS_OURO else "") + str(r['PRODUTO NOME']), 
                         "SUGERIDO": f"R$ {float(p_sug):.2f}", 
+                        "MARKUP_REC_VAL": 38.0, # Padrão recomendado
                         "PREÇO_NA_LOJA": 0.0
                     })
 
             if dados_tabela:
-                st.info("💡 **Legenda de Auditoria:** Preencha o preço praticado na loja. O sistema sinaliza em **Verde** se estiver igual/abaixo do recomendado (ideal para giro) e em **Vermelho** se estiver acima do recomendado com o percentual de desvio.")
+                st.info("💡 **Legenda de Auditoria:** Informe o preço praticado na loja. O sistema exibe o Markup Recomendado (Verde) e o Markup Praticado (Verde se igual/abaixo do recomendado, Vermelho se estiver acima).")
                 
                 df_editor = st.data_editor(
                     pd.DataFrame(dados_tabela), 
                     use_container_width=True, 
                     hide_index=True, 
-                    disabled=["CÓDIGO", "PRODUTO", "SUGERIDO"],
+                    disabled=["CÓDIGO", "PRODUTO", "SUGERIDO", "MARKUP_REC_VAL"],
                     column_config={
                         "NA_LOJA": st.column_config.CheckboxColumn(
                             "NÃO TEM NA LOJA?",
-                            help="Marque esta caixinha caso o produto esteja ausente na loja.",
+                            help="Marque caso o produto esteja ausente.",
                             default=False,
                         ),
                         "PREÇO_NA_LOJA": st.column_config.NumberColumn(
@@ -289,9 +309,8 @@ if not vendas.empty:
                             min_value=0.0,
                             format="R$ %.2f"
                         ),
-                        "SUGERIDO": st.column_config.TextColumn(
-                            "PREÇO SUG. (RECOMENDADO)"
-                        )
+                        "SUGERIDO": st.column_config.TextColumn("PR. SUGERIDO"),
+                        "MARKUP_REC_VAL": st.column_config.NumberColumn("MARKUP REC. (%)", format="%.1f%%")
                     }
                 )
                 
