@@ -266,7 +266,7 @@ if not vendas.empty:
                         "NA_LOJA": False,  
                         "CÓDIGO": cod, 
                         "PRODUTO": ("⭐ " if cod in CODIGOS_OURO else "") + str(r['PRODUTO NOME']), 
-                        "SUGERIDO (RECOMENDADO)": f"R$ {float(p_sug):.2f}", 
+                        "SUGERIDO": f"R$ {float(p_sug):.2f}", 
                         "PREÇO_NA_LOJA": 0.0
                     })
 
@@ -277,7 +277,7 @@ if not vendas.empty:
                     pd.DataFrame(dados_tabela), 
                     use_container_width=True, 
                     hide_index=True, 
-                    disabled=["CÓDIGO", "PRODUTO", "SUGERIDO (RECOMENDADO)"],
+                    disabled=["CÓDIGO", "PRODUTO", "SUGERIDO"],
                     column_config={
                         "NA_LOJA": st.column_config.CheckboxColumn(
                             "NÃO TEM NA LOJA?",
@@ -288,6 +288,9 @@ if not vendas.empty:
                             "PREÇO PRATICADO NA LOJA (R$)",
                             min_value=0.0,
                             format="R$ %.2f"
+                        ),
+                        "SUGERIDO": st.column_config.TextColumn(
+                            "PREÇO SUG. (RECOMENDADO)"
                         )
                     }
                 )
