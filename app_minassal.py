@@ -53,12 +53,22 @@ ROTAS_PROMOTORES = {
     "Madalla": ["CONSELHEIRO LAFAIETE", "GUARANI", "GUIDOVAL", "MURIAE", "MURIAÉ", "PIRAUBA", "PIRAÚBA", "RIO POMBA", "TOCANTINS", "UBA", "UBÁ", "VICOSA", "VIÇOSA", "VISCONDE DO RIO BRANCO"]
 }
 
-# --- CARREGAR DADOS COM MOTOR OPENPYXL EXPLÍCITO ---
+# --- CARREGAR DADOS COM SUPORTE ROBUSTO A CSV E EXCEL ---
 @st.cache_data
 def carregar_dados(caminho):
     if not caminho: return pd.DataFrame()
     try:
-        df = pd.read_excel(caminho, sheet_name=0, engine='openpyxl')
+        if str(caminho).endswith('.csv'):
+            # Tenta ler com separador automático ou vírgula/ponto-e-vírgula
+            try:
+                df = pd.read_csv(caminho, sep=',', encoding='utf-8', low_memory=False)
+                if len(df.columns) <= 1:
+                    df = pd.read_csv(caminho, sep=';', encoding='utf-8', low_memory=False)
+            except:
+                df = pd.read_csv(caminho, sep=';', encoding='latin1', low_memory=False)
+        else:
+            df = pd.read_excel(caminho, sheet_name=0, engine='openpyxl')
+            
         if len(df) > 0 and 'TOTAL GERAL' in str(df.iloc[0, 0]):
             df = df.iloc[1:].reset_index(drop=True)
         df.columns = [str(c).strip().upper() for c in df.columns]
@@ -86,8 +96,8 @@ def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido, df_vendas_origina
     estilo_tabela = [
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#E2001A")),
         ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
-        ('ALIGN', (0,0), (0,-1), 'LEFT'),      # Produto alinhado à esquerda
-        ('ALIGN', (1,0), (-1,-1), 'CENTER'),    # Demais colunas perfeitamente centralizadas
+        ('ALIGN', (0,0), (0,-1), 'LEFT'),      
+        ('ALIGN', (1,0), (-1,-1), 'CENTER'),    
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
         ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
         ('FONTSIZE', (0,0), (-1,-1), 8)
@@ -187,7 +197,6 @@ def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido, df_vendas_origina
     t.setStyle(TableStyle(estilo_tabela))
     elementos.append(t)
     
-    # --- SEÇÃO INFERIOR PARA PRODUTOS AUSENTES ---
     if produtos_ausentes_detalhes:
         elementos.append(Spacer(1, 12))
         elementos.append(Paragraph("<b>HISTÓRICO DE ITENS AUSENTES (ÚLTIMA COMPRA)</b>", estilos['Heading3']))
@@ -205,7 +214,6 @@ def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido, df_vendas_origina
     doc.build(elementos)
     return caminho_pdf
 
-# --- ENVIO DE EMAIL ---
 def enviar_email_coleta(promotor, loja, cidade, df_editado, feedback, df_vendas_original):
     remetente = "beneditobandola@gmail.com"
     senha = "kfih ccqx cskn oito"
@@ -338,4 +346,4 @@ if not vendas.empty:
             else:
                 st.warning("Nenhum produto com preço sugerido mapeado foi encontrado para esta loja.")
 else:
-    st.error("Arquivo 'Vendas.xlsx' não encontrado ou vazio na raiz do repositório.")
+    st.error("Arquivo de vendas não encontrado ou vazio na raiz do repositório.")
