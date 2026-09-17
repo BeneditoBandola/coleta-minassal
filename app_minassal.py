@@ -53,12 +53,12 @@ ROTAS_PROMOTORES = {
     "Madalla": ["CONSELHEIRO LAFAIETE", "GUARANI", "GUIDOVAL", "MURIAE", "MURIAÉ", "PIRAUBA", "PIRAÚBA", "RIO POMBA", "TOCANTINS", "UBA", "UBÁ", "VICOSA", "VIÇOSA", "VISCONDE DO RIO BRANCO"]
 }
 
-# --- CARREGAR DADOS COM PADRONIZAÇÃO DE CÓDIGOS ---
+# --- CARREGAR DADOS COM MOTOR OPENPYXL EXPLÍCITO ---
 @st.cache_data
 def carregar_dados(caminho):
     if not caminho: return pd.DataFrame()
     try:
-        df = pd.read_excel(caminho, sheet_name=0)
+        df = pd.read_excel(caminho, sheet_name=0, engine='openpyxl')
         if len(df) > 0 and 'TOTAL GERAL' in str(df.iloc[0, 0]):
             df = df.iloc[1:].reset_index(drop=True)
         df.columns = [str(c).strip().upper() for c in df.columns]
@@ -67,7 +67,7 @@ def carregar_dados(caminho):
         st.error(f"Erro ao ler {caminho}: {e}")
         return pd.DataFrame()
 
-# --- FUNÇÃO DE GERAÇÃO DE PDF (MODO PAISAGEM COM ITENS CENTRALIZADOS) ---
+# --- FUNÇÃO DE GERAÇÃO DE PDF ---
 def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido, df_vendas_original):
     hora_brasil = datetime.now() - timedelta(hours=3)
     data_str = hora_brasil.strftime('%d/%m/%Y %H:%M')
@@ -87,7 +87,7 @@ def gerar_pdf_relatorio(promotor, loja, cidade, df_preenchido, df_vendas_origina
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#E2001A")),
         ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
         ('ALIGN', (0,0), (0,-1), 'LEFT'),      # Produto alinhado à esquerda
-        ('ALIGN', (1,0), (-1,-1), 'CENTER'),   # Demais colunas perfeitamente centralizadas
+        ('ALIGN', (1,0), (-1,-1), 'CENTER'),    # Demais colunas perfeitamente centralizadas
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
         ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
         ('FONTSIZE', (0,0), (-1,-1), 8)
